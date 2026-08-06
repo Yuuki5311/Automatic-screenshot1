@@ -23,39 +23,13 @@ jobs:
 
       - name: 安装依赖
         run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
+          python -m pip install --upgrade pip
+          pip install airtest pocoui Pillow numpy
           pip install pyinstaller
 
       - name: 打包 exe
         run: |
-          pyinstaller --onefile --windowed --name AutoScreenshot `
-            --hidden-import tkinter `
-            --hidden-import tkinter.ttk `
-            --hidden-import cv2 `
-            --hidden-import cv2._core `
-            --collect-all cv2 `
-            --hidden-import numpy `
-            --hidden-import numpy._core `
-            --hidden-import PIL `
-            --hidden-import PIL.Image `
-            --hidden-import PIL.ImageTk `
-            --hidden-import selenium `
-            --hidden-import selenium.webdriver.chrome.service `
-            --hidden-import selenium.webdriver.chrome.options `
-            --hidden-import selenium.webdriver.edge.service `
-            --hidden-import selenium.webdriver.edge.options `
-            --collect-all selenium `
-            --collect-binaries selenium `
-            --hidden-import webdriver_manager `
-            --hidden-import webdriver_manager.chrome `
-            --hidden-import webdriver_manager.core.os_manager `
-            --hidden-import urllib3 `
-            --hidden-import requests `
-            --hidden-import certifi `
-            --add-data "templates;templates" `
-            --add-data "calibrated_coords.json;." `
-            main.py
+          pyinstaller AutoScreenshot.spec --noconfirm --clean
 
       - name: 验证构建产物
         run: |

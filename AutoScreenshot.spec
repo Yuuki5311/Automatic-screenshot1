@@ -1,27 +1,54 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_dynamic_libs
-from PyInstaller.utils.hooks import collect_all
+from pathlib import Path
 
-datas = [('templates', 'templates'), ('calibrated_coords.json', '.')]
-binaries = []
-hiddenimports = ['tkinter', 'tkinter.ttk', 'cv2', 'cv2._core', 'numpy', 'numpy._core', 'PIL', 'PIL.Image', 'PIL.ImageTk', 'selenium', 'selenium.webdriver.chrome.service', 'selenium.webdriver.chrome.options', 'selenium.webdriver.edge.service', 'selenium.webdriver.edge.options', 'webdriver_manager', 'webdriver_manager.chrome', 'webdriver_manager.core.os_manager', 'urllib3', 'requests', 'certifi']
-binaries += collect_dynamic_libs('selenium')
-tmp_ret = collect_all('cv2')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('selenium')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+from PyInstaller.utils.hooks import collect_data_files
+
+
+def _has_pocoui() -> bool:
+    """检测 pocoui 是否已安装（pocoui 为可选依赖，未安装时跳过收集）。"""
+    try:
+        import pocoui  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+# 收集 Airtest 数据文件（ADB 二进制等）
+airtest_datas = collect_data_files('airtest')
+pocoui_datas = collect_data_files('pocoui') if _has_pocoui() else []
+
+# 模板目录
+template_datas = []
+templates_dir = Path('airtest_templates')
+if templates_dir.is_dir():
+    template_datas = [(str(p), str(p.relative_to('.'))) for p in templates_dir.rglob('*.png')]
 
 
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=binaries,
-    datas=datas,
-    hiddenimports=hiddenimports,
+    binaries=[],
+    datas=airtest_datas + pocoui_datas + template_datas,
+    hiddenimports=[
+        'airtest',
+        'airtest.core',
+        'airtest.core.api',
+        'airtest.aircv',
+        'airtest.aircv.template_matching',
+        'pocoui',
+        'cv2',
+        'numpy',
+        'PIL',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=[
+        'tkinter.test',
+        'unittest',
+        'test',
+        'pydoc',
+    ],
     noarchive=False,
     optimize=0,
 )

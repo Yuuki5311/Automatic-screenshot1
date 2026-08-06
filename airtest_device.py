@@ -22,6 +22,7 @@ from airtest.core.api import (
     touch,
     wait,
 )
+from airtest.aircv.error import FileNotExistError
 from airtest.core.error import TargetNotFoundError
 
 from config import (
@@ -92,7 +93,7 @@ class AirtestDevice:
             touch(tpl)
             log.info(f"点击模板: {template_name}")
             return True
-        except TargetNotFoundError:
+        except (TargetNotFoundError, FileNotExistError, OSError):
             log.warning(f"模板未出现 ({timeout}s): {template_name}")
             return False
 
@@ -113,7 +114,7 @@ class AirtestDevice:
             wait(tpl, timeout=timeout)
             log.info(f"模板已出现: {template_name}")
             return True
-        except TargetNotFoundError:
+        except (TargetNotFoundError, FileNotExistError, OSError):
             log.warning(f"等待模板超时 ({timeout}s): {template_name}")
             return False
 
@@ -129,7 +130,11 @@ class AirtestDevice:
         """
         tpl_path = self._template_path(template_name)
         tpl = Template(tpl_path, threshold=threshold)
-        return bool(exists(tpl))
+        try:
+            return bool(exists(tpl))
+        except (TargetNotFoundError, FileNotExistError, OSError):
+            log.warning(f"模板检查失败 (文件缺失或错误): {template_name}")
+            return False
 
     # ------------------------------------------------------------------
     # 截图

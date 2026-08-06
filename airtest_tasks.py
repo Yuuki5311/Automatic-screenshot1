@@ -272,7 +272,7 @@ ALL_TASKS: list[ScreenshotTask] = [
     ScreenshotTask(
         name="主页",
         setup=[
-            ClickTemplate("game_main.png", desc="确认主界面"),
+            ClickCoord(379, 249, desc="点击左上角头像进入个人主页"),
             ClickTemplate("tab_home.png", desc="点击主页标签"),
         ],
         teardown_back=0,

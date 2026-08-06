@@ -31,10 +31,20 @@ class ClickTemplate:
 
 @dataclass
 class ClickCoord:
-    """坐标点击操作（极少场景：点击位置不固定的元素）。"""
+    """坐标点击操作（极少场景：点击位置不固定的元素）。
+
+    Attributes:
+        x: 点击横坐标。
+        y: 点击纵坐标。
+        desc: 操作描述。
+        verify_template: 点击后等待出现的模板（如加载缓慢的目标页）。
+        verify_timeout: 等待 verify_template 的超时秒数。
+    """
     x: int
     y: int
     desc: str = ""
+    verify_template: str = ""
+    verify_timeout: float = 30.0
 
 
 @dataclass
@@ -95,8 +105,6 @@ def execute_action(device, action: Action) -> bool:
         device: AirtestDevice 实例。
         action: ClickTemplate / ClickCoord / SwipeAction / GuardAction。
     """
-    import airtest_device as _ad
-
     if isinstance(action, ClickTemplate):
         return _execute_click_template(device, action)
 
@@ -137,6 +145,11 @@ def _execute_click_coord(device, action: ClickCoord) -> bool:
     touch((action.x, action.y))
     log.info(f"坐标点击: ({action.x}, {action.y}) {action.desc}")
     time.sleep(CLICK_INTERVAL)
+    if action.verify_template:
+        log.info(f"等待验证模板: {action.verify_template} (最多 {action.verify_timeout}s)")
+        if not device.wait_template(action.verify_template, timeout=action.verify_timeout):
+            log.error(f"验证模板未出现 ({action.verify_timeout}s): {action.verify_template}")
+            return False
     return True
 
 
@@ -215,6 +228,8 @@ def run_screenshot_loop(
         for action in task.setup:
             desc = getattr(action, "desc", "") or getattr(action, "template", str(action))
             _emit(f"  → {desc}")
+            # 点击前扫描弹窗，避免弹窗拦截下一次点击
+            scan_popups(device)
             if not execute_action(device, action):
                 _emit(f"  ✗ 前置操作失败: {desc}", "warn")
                 # 失败不中止，继续尝试后续操作
@@ -379,7 +394,7 @@ ALL_TASKS: list[ScreenshotTask] = [
         setup=[
             ClickTemplate("customize_icon.png", desc="点击定制"),
             ClickTemplate("skin_customize.png", desc="点击皮肤定制"),
-            ClickCoord(1377, 366, desc="点击小兵"),
+            ClickCoord(1377, 366, desc="点击小兵", verify_template="back_arrow.png", verify_timeout=120.0),
         ],
         teardown_back=1,
     ),

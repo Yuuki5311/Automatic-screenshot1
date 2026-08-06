@@ -1,6 +1,7 @@
-"""Tkinter GUI 主应用。
+"""Tkinter GUI 主应用 — Airtest 版本。
 
 管理页面切换、后台任务调度、跨线程通信。
+2 个页面：空闲页（启动模拟器/开始运行）、进度页（日志 + 进度）。
 """
 
 import tkinter as tk
@@ -9,22 +10,20 @@ import threading
 import queue
 import time
 
-from gui.widgets.qr_display import QRDisplay
 from gui.widgets.log_view import LogView
 
 
 class App(tk.Tk):
-    """GUI 主窗口，4 个页面：待命、扫码、进度、完成。"""
+    """GUI 主窗口，2 个页面：空闲、进度。"""
 
     def __init__(self):
         super().__init__()
 
-        self.title("王者荣耀云游戏自动截图")
+        self.title("王者荣耀自动截图 (Airtest)")
         self.geometry("480x620")
         self.resizable(True, True)
         self.minsize(400, 500)
 
-        # 禁止直接关闭窗口时残留进程
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         # ---- 跨线程通信 ----
@@ -32,19 +31,11 @@ class App(tk.Tk):
         self._stop_event = threading.Event()
         self._worker_thread = None
 
-        # ---- 状态 ----
-        self._platform_logged_in = False  # 腾讯先锋是否已登录
-        self._driver = None               # WebDriver 实例
-
-        # ---- 平台选择（首页直接选定） ----
-        self._platform_choice = None
-        self._platform_var = tk.StringVar(value="qq_ios")
+        # ---- 模拟器设备 ----
+        self._device = None
 
         # ---- 账号输入 ----
         self._account_var = tk.StringVar(value="")
-
-        # ---- 手动登录 ----
-        self._manual_login_event = threading.Event()
 
         # ---- 构建 UI ----
         self._build_ui()
@@ -63,7 +54,7 @@ class App(tk.Tk):
         header = ttk.Frame(self)
         header.pack(fill="x", padx=10, pady=(10, 0))
         ttk.Label(
-            header, text="王者荣耀云游戏自动截图",
+            header, text="王者荣耀自动截图 (Airtest)",
             font=("", 16, "bold")
         ).pack(side="left")
 
@@ -71,7 +62,7 @@ class App(tk.Tk):
         self._page_container = ttk.Frame(self)
         self._page_container.pack(fill="both", expand=True, padx=10, pady=5)
 
-        # ---- 页面 1: 待命页 ----
+        # ---- 页面 1: 空闲页 ----
         self._page_idle = ttk.Frame(self._page_container)
         ttk.Label(
             self._page_idle, text="就绪",
@@ -79,61 +70,37 @@ class App(tk.Tk):
         ).pack(pady=(20, 5))
         ttk.Label(
             self._page_idle,
-            text="选择登录方式并启动",
+            text="连接 MuMu 模拟器并启动截图任务",
             font=("", 11)
         ).pack(pady=(0, 10))
 
-        # 腾讯先锋登录方式
-        login_frame = ttk.LabelFrame(self._page_idle, text="腾讯先锋登录", padding=10)
-        login_frame.pack(pady=5, fill="x", padx=10)
-        self._login_type = tk.StringVar(value="qq")
-        ttk.Radiobutton(
-            login_frame, text="QQ 扫码登录", variable=self._login_type, value="qq"
-        ).pack(anchor="w", pady=2)
-        ttk.Radiobutton(
-            login_frame, text="微信扫码登录", variable=self._login_type, value="wechat"
-        ).pack(anchor="w", pady=2)
-        ttk.Radiobutton(
-            login_frame, text="QQ 密码登录（手动）", variable=self._login_type, value="qq_password"
-        ).pack(anchor="w", pady=2)
-
-        # 游戏内登录平台
-        platform_frame = ttk.LabelFrame(self._page_idle, text="游戏登录平台", padding=10)
-        platform_frame.pack(pady=5, fill="x", padx=10)
-
-        platforms = [
-            ("🟢 微信 iOS 好友", "wx_ios"),
-            ("🟢 微信安卓好友", "wx_android"),
-            ("🔵 QQ iOS 好友", "qq_ios"),
-            ("🔵 QQ 安卓好友", "qq_android"),
-        ]
-        for text, value in platforms:
-            ttk.Radiobutton(
-                platform_frame, text=text,
-                variable=self._platform_var, value=value
-            ).pack(anchor="w", pady=2)
+        # 模拟器状态
+        emu_frame = ttk.LabelFrame(self._page_idle, text="模拟器", padding=10)
+        emu_frame.pack(pady=5, fill="x", padx=10)
+        ttk.Label(
+            emu_frame,
+            text="MuMu 12 Android Emulator\nADB: 127.0.0.1:7555",
+            font=("", 10)
+        ).pack(anchor="w")
 
         # 账号输入
-        account_frame = ttk.LabelFrame(self._page_idle, text="账号（作为截图文件夹名）", padding=10)
+        account_frame = ttk.LabelFrame(
+            self._page_idle, text="账号（作为截图文件夹名）", padding=10
+        )
         account_frame.pack(pady=5, fill="x", padx=10)
-        ttk.Entry(account_frame, textvariable=self._account_var, width=30).pack(fill="x")
+        ttk.Entry(
+            account_frame, textvariable=self._account_var, width=30
+        ).pack(fill="x")
 
         ttk.Button(
             self._page_idle, text="启 动",
             command=self._on_start, width=20
         ).pack(pady=10)
 
-        # ---- 页面 2: 扫码页 ----
-        self._page_qr = ttk.Frame(self._page_container)
-        self._qr_display = QRDisplay(self._page_qr, qr_size=260)
-        self._qr_display.pack(fill="both", expand=True, pady=20)
-
-        # ---- 页面 3: 进度页 ----
+        # ---- 页面 2: 进度页 ----
         self._page_progress = ttk.Frame(self._page_container)
         self._log_view = LogView(self._page_progress)
         self._log_view.pack(fill="both", expand=True)
-
-        # ---- 页面 4: 完成页（已移除，完成后回到待命页） ----
 
         # ---- 底部按钮 ----
         bottom = ttk.Frame(self)
@@ -144,13 +111,9 @@ class App(tk.Tk):
         self._exit_btn = ttk.Button(
             bottom, text="退 出", command=self._on_close
         )
-        self._manual_login_btn = ttk.Button(
-            bottom, text="完成登录 →", command=self._on_manual_login_done
-        )
-        # 初始显示退出按钮，再执行一轮按钮在完成前隐藏
         self._exit_btn.pack(side="right")
 
-        # 默认显示待命页
+        # 默认显示空闲页
         self._show_page("idle")
 
     # ------------------------------------------------------------------
@@ -159,22 +122,16 @@ class App(tk.Tk):
 
     def _show_page(self, name: str):
         """显示指定页面，隐藏其余。"""
-        for page in [self._page_idle, self._page_qr,
-                     self._page_progress]:
+        for page in [self._page_idle, self._page_progress]:
             page.pack_forget()
 
         mapping = {
             "idle": self._page_idle,
-            "qr": self._page_qr,
             "progress": self._page_progress,
         }
         page = mapping.get(name)
         if page:
             page.pack(fill="both", expand=True)
-
-        # 扫码页的特殊处理：底部退出按钮在扫码时可用
-        if name == "qr":
-            self._exit_btn.config(state="normal")
 
     # ------------------------------------------------------------------
     # 按钮事件
@@ -189,17 +146,7 @@ class App(tk.Tk):
         self._show_page("progress")
         self._log_view.add_log("启动任务...", "info")
         self._exit_btn.config(state="normal")
-        self._rerun_btn.pack_forget()  # 运行时隐藏再执行一轮按钮
-
-        # 启动前在主线程锁定选项（避免后台线程读 Tk 变量）
-        self._platform_choice = self._platform_var.get()
-        self._selected_login_type = self._login_type.get()
-        self._log_view.add_log(f"游戏平台: {self._platform_choice}", "info")
-        _login_labels = {"qq": "QQ 扫码", "wechat": "微信扫码", "qq_password": "QQ 密码"}
-        self._log_view.add_log(
-            f"腾讯先锋登录: {_login_labels.get(self._selected_login_type, self._selected_login_type)}",
-            "info",
-        )
+        self._rerun_btn.pack_forget()
 
         self._worker_thread = threading.Thread(
             target=self._run_workflow, daemon=True
@@ -211,14 +158,9 @@ class App(tk.Tk):
         self._stop_event.set()
         if self._worker_thread and self._worker_thread.is_alive():
             self._worker_thread.join(timeout=5)
-        # 统一清理：cleanup_all() 内部做 quit → 验证 → taskkill 三级降级
         import process_cleanup
         process_cleanup.cleanup_all()
         self.destroy()
-
-    def _on_manual_login_done(self):
-        """用户点击完成登录 → 唤醒后台线程。"""
-        self._manual_login_event.set()
 
     # ------------------------------------------------------------------
     # 队列轮询
@@ -241,34 +183,8 @@ class App(tk.Tk):
         if msg_type == "log":
             self._log_view.add_log(msg["text"], msg.get("level", "info"))
 
-        elif msg_type == "show_manual_btn":
-            self._manual_login_btn.pack(side="right", padx=(0, 5))
-        elif msg_type == "hide_manual_btn":
-            self._manual_login_btn.pack_forget()
-
         elif msg_type == "progress":
             self._log_view.update_progress(msg["current"], msg["total"])
-
-        elif msg_type == "qr":
-            self._show_page("qr")
-            self._qr_display.show_qr(msg["image"], msg["title"])
-            self._qr_display.update_status(
-                msg.get("status", "⏳ 等待扫码中..."), "gray"
-            )
-
-        elif msg_type == "scan_wait":
-            self._show_page("qr")
-            self._qr_display._title_label.config(text=msg.get("title", ""))
-            self._qr_display._image_label.config(image="")
-            self._qr_display._tk_image = None
-            self._qr_display.update_status(
-                msg.get("text", "⏳ 请在浏览器/游戏中扫码..."), "gray"
-            )
-
-        elif msg_type == "qr_status":
-            self._qr_display.update_status(
-                msg["text"], msg.get("color", "black")
-            )
 
         elif msg_type == "page":
             self._show_page(msg["name"])
@@ -279,560 +195,101 @@ class App(tk.Tk):
             self._rerun_btn.pack(side="left", padx=(0, 5))
 
     # ------------------------------------------------------------------
-    # 后台工作流
+    # 线程安全消息发送
     # ------------------------------------------------------------------
 
     def _send(self, msg: dict):
         """线程安全地向 GUI 队列发送消息。"""
         self._queue.put(msg)
 
+    # ------------------------------------------------------------------
+    # 后台工作流
+    # ------------------------------------------------------------------
+
     def _run_workflow(self):
         """后台线程：执行完整的登录 → 截图工作流。"""
         from logger import get_logger
         import os
-        import json
 
         _log = get_logger()
-        driver = self._driver
-        _nav = None
-        nav = None
-        monitor = None
 
         try:
-            _log.info("工作流线程启动")
+            _log.info("工作流线程启动 (Airtest)")
             self._send({"type": "log", "text": "正在加载组件..."})
-            _entered_via_fast_path = False
-            # 依赖应已在 main 主线程预加载；此处再导入以便开发模式懒加载
-            from browser import create_browser
-            from config import BROWSER_WIDTH, BROWSER_HEIGHT, TEMPLATES_DIR, SCREENSHOTS_DIR, resource_path, writable_path, CLICK_INTERVAL
-            from login import web_login, game_login, click_confirm_dialog, manual_login
-            from game_launcher import launch_game
-            from navigator import Navigator
-            from screenshotter import Screenshotter
-            from popup_monitor import PopupMonitor
-            from ui_loop import UiLoop, run_pre_logout_loop, close_perception_popup, login_platform_page_visible
-            from keybind_config import configure_keybinding
+
+            from airtest_device import AirtestDevice
+            from airtest_login import game_login
+            from airtest_keybind import configure_keybinding
+            from airtest_tasks import ALL_TASKS, run_screenshot_loop
+            from config import DEVICE_URI
+
             _log.info("工作流模块就绪")
 
-            # ====== 阶段 1: 腾讯先锋登录（仅一次） ======
-            if not self._platform_logged_in:
-                if self._stop_event.is_set():
-                    return
-
-                _log.info("[阶段1] 开始腾讯先锋登录")
-                login_type = getattr(self, "_selected_login_type", None) or "qq"
-
-                if login_type == "qq_password":
-                    # ---- 半自动密码登录 ----
-                    _log.info("[阶段1] 手动密码登录模式")
-                    try:
-                        driver = create_browser(BROWSER_WIDTH, BROWSER_HEIGHT)
-                    except Exception as e:
-                        _log.exception("[阶段1] 打开浏览器失败")
-                        self._send({"type": "log", "text": f"❌ 打开浏览器失败: {e}", "level": "error"})
-                        self._send({"type": "done", "text": f"❌ 打开浏览器失败:\n{e}"})
-                        return
-
-                    self._driver = driver
-                    self._send({"type": "log", "text": "✅ 浏览器已打开", "level": "success"})
-
-                    def _on_status(text):
-                        if "成功" in text:
-                            self._send({"type": "log", "text": text, "level": "success"})
-                        elif "失败" in text or "超时" in text or "⚠" in text:
-                            self._send({"type": "log", "text": text,
-                                        "level": "error" if "失败" in text else "warn"})
-                        else:
-                            self._send({"type": "log", "text": text})
-
-                    self._send({"type": "log", "text": "请在浏览器中手动完成 QQ 登录..."})
-                    self._send({"type": "page", "name": "progress"})
-                    self._queue.put({"type": "show_manual_btn"})
-
-                    if not manual_login(driver, _on_status, ready_event=self._manual_login_event):
-                        self._queue.put({"type": "hide_manual_btn"})
-                        self._send({"type": "done", "text": "❌ 手动登录失败或超时"})
-                        return
-
-                    self._queue.put({"type": "hide_manual_btn"})
-                    self._platform_logged_in = True
-                    self._send({"type": "page", "name": "progress"})
-                    self._send({"type": "log", "text": "✅ 腾讯先锋登录成功", "level": "success"})
-
-                else:
-                    # ---- 扫码登录（原有代码不变，仅删除 login_type = getattr(...) 行） ----
-                    self._send({
-                        "type": "log",
-                        "text": "正在打开 Edge 浏览器（首次需联网下载驱动，可能需 1～2 分钟）...",
-                    })
-
-                    try:
-                        driver = create_browser(BROWSER_WIDTH, BROWSER_HEIGHT)
-                    except Exception as e:
-                        _log.exception("[阶段1] 打开浏览器失败")
-                        self._send({
-                            "type": "log",
-                            "text": f"❌ 打开浏览器失败: {e}",
-                            "level": "error",
-                        })
-                        self._send({"type": "done", "text": f"❌ 打开浏览器失败:\n{e}"})
-                        return
-
-                    self._driver = driver
-                    _log.info(f"[阶段1] 登录方式: {login_type}，浏览器已就绪")
-                    self._send({"type": "log", "text": "✅ 浏览器已打开", "level": "success"})
-
-                    def on_qr(image=None):
-                        title = f"腾讯先锋{'QQ' if login_type == 'qq' else '微信'}登录"
-                        if image is not None:
-                            self._send({
-                                "type": "qr",
-                                "image": image,
-                                "title": title,
-                                "status": "⏳ 请扫描下方二维码（也可在浏览器窗口扫）...",
-                            })
-                        else:
-                            self._send({
-                                "type": "scan_wait",
-                                "title": title,
-                                "text": "⏳ 未截到二维码，请直接在浏览器窗口扫码...",
-                            })
-
-                    def on_status(text):
-                        if "成功" in text:
-                            self._send({"type": "qr_status", "text": text, "color": "green"})
-                        elif "失败" in text or "超时" in text or "⚠" in text:
-                            self._send({"type": "qr_status", "text": text, "color": "red"})
-                        else:
-                            self._send({"type": "qr_status", "text": text})
-                        self._send({"type": "log", "text": text,
-                                    "level": "success" if "成功" in text else ("error" if "失败" in text or "超时" in text else "info")})
-
-                    self._send({"type": "log", "text": f"开始腾讯先锋{'QQ' if login_type == 'qq' else '微信'}扫码登录..."})
-
-                    if not web_login(driver, login_type, on_qr, on_status):
-                        _log.error("[阶段1] 腾讯先锋登录失败")
-                        self._send({"type": "log", "text": "❌ 腾讯先锋登录失败", "level": "error"})
-                        self._send({"type": "done", "text": "❌ 腾讯先锋登录失败"})
-                        return
-
-                    _log.info("[阶段1] 腾讯先锋登录成功")
-                    self._platform_logged_in = True
-                    self._send({"type": "page", "name": "progress"})
-                    self._send({"type": "log", "text": "✅ 腾讯先锋登录成功", "level": "success"})
-
-                # ====== 阶段 2: 搜索游戏并启动 ======
-                if self._stop_event.is_set():
-                    return
-
-                _log.info("[阶段2] 开始搜索游戏")
-                self._send({"type": "log", "text": "正在搜索王者荣耀..."})
-                if not launch_game(driver):
-                    _log.error("[阶段2] 搜索/启动游戏失败")
-                    self._send({"type": "log", "text": "❌ 搜索/启动游戏失败", "level": "error"})
-                    self._send({"type": "done", "text": "❌ 启动游戏失败"})
-                    return
-
-                _log.info(f"[阶段2] 游戏启动完成，当前 URL: {driver.current_url}")
-
-                self._send({"type": "log", "text": "✅ 已切换到云游戏标签页", "level": "success"})
-
-                # ---- 感知环：先清弹窗 → 检测 enter_game / 退出重登 ----
-                self._send({"type": "log", "text": "等待 10 秒后启动感知环..."})
-                time.sleep(10)
-                _nav = Navigator(driver=driver, templates_dir=resource_path(TEMPLATES_DIR))
-
-                # ---- 阶段 2 前置: 等待 5s → 点击 keybind_pos 坐标 ----
-                self._send({"type": "log", "text": "等待 5 秒后点击 keybind_pos 坐标..."})
-                time.sleep(5)
-                keybind_coords = None
-                try:
-                    with open(resource_path("calibrated_coords.json"), "r") as f:
-                        keybind_coords = json.load(f).get("keybind_pos")
-                except Exception:
-                    pass
-                if keybind_coords:
-                    _nav.click_css(*keybind_coords)
-                    self._send({"type": "log", "text": f"已点击 keybind_pos 坐标 ({keybind_coords[0]}, {keybind_coords[1]})", "level": "success"})
-                    time.sleep(CLICK_INTERVAL)
-                else:
-                    self._send({"type": "log", "text": "⚠️ 未找到 keybind_pos 坐标，跳过", "level": "warn"})
-
-                _entered_via_fast_path = False
-                STAGE2_TIMEOUT = 60
-                STAGE2_TICK = 2.0
-                deadline = time.time() + STAGE2_TIMEOUT
-
-                # ==== Phase 1: 彻底清弹窗 ====
-                self._send({"type": "log", "text": "感知环 Phase 1: 清理弹窗..."})
-                _popup_clean_rounds = 0
-                while time.time() < deadline:
-                    if self._stop_event.is_set():
-                        return
-                    hit = close_perception_popup(_nav, on_log=lambda text, level="info":
-                        self._send({"type": "log", "text": text, "level": level}))
-                    if hit:
-                        _popup_clean_rounds = 0
-                        time.sleep(STAGE2_TICK)
-                        continue
-                    _popup_clean_rounds += 1
-                    if _popup_clean_rounds >= 3:
-                        self._send({"type": "log", "text": "弹窗清理完毕", "level": "success"})
-                        break
-                    time.sleep(STAGE2_TICK)
-
-                # ==== Phase 2: 检测 enter_game / 退出登录 / 返回箭头 ====
-                self._send({"type": "log", "text": "感知环 Phase 2: 检测进入游戏..."})
-                _nothing_ticks = 0
-                while time.time() < deadline:
-                    if self._stop_event.is_set():
-                        return
-
-                    # ① 弹窗优先
-                    hit = close_perception_popup(_nav, on_log=lambda text, level="info":
-                        self._send({"type": "log", "text": text, "level": level}))
-                    if hit:
-                        _nothing_ticks = 0
-                        time.sleep(STAGE2_TICK)
-                        continue
-
-                    # ② 检测 enter_game → 快速通道
-                    if _nav.wait_for_template("enter_game.png", timeout=1):
-                        self._send({"type": "log", "text": "检测到进入游戏按钮，快速通道", "level": "success"})
-                        _nav.find_and_click("enter_game.png", timeout=5)
-                        time.sleep(3)
-                        _entered_via_fast_path = True
-                        break
-
-                    # ③ 已在主界面 → 快速通道
-                    if _nav.wait_for_template("game_main.png", timeout=1):
-                        self._send({"type": "log", "text": "已在游戏主界面，快速通道", "level": "success"})
-                        _entered_via_fast_path = True
-                        break
-
-                    # ④ 检测退出按钮 → 点击退出
-                    if _nav.find_and_click("game_logout_btn.png", timeout=2, max_retries=1, threshold=0.75):
-                        self._send({"type": "log", "text": "点击退出登录...", "level": "info"})
-                        _nothing_ticks = 0
-                        time.sleep(2)
-                        close_perception_popup(_nav, on_log=lambda text, level="info":
-                            self._send({"type": "log", "text": text, "level": level}))
-                        continue
-
-                    # ⑤ 清返回箭头
-                    if _nav.find_and_click("back_arrow.png", timeout=2, max_retries=1, threshold=0.75):
-                        self._send({"type": "log", "text": "点击返回箭头..."})
-                        _nothing_ticks = 0
-                        time.sleep(1)
-                        continue
-
-                    # ⑥ 已在平台选择页 → 退出感知环，交给 game_login
-                    if login_platform_page_visible(_nav):
-                        self._send({"type": "log", "text": "检测到平台选择页，退出感知环，进入游戏登录", "level": "info"})
-                        break
-
-                    # 连续无匹配 → 提前退出（避免空转截屏压垮云游戏 tab）
-                    _nothing_ticks += 1
-                    if _nothing_ticks >= 8:
-                        self._send({"type": "log", "text": "连续无匹配，退出感知环，进入游戏登录", "level": "warn"})
-                        break
-
-                    time.sleep(STAGE2_TICK)
-
-                _nav.cleanup()
-
-                if _entered_via_fast_path:
-                    self._send({"type": "log", "text": "✅ 快速通道，跳过游戏登录", "level": "success"})
-                else:
-                    self._send({"type": "log", "text": "感知环结束，进入平台选择", "level": "info"})
-
-            # ====== 阶段 3: 游戏内登录 + 截图 ======
+            # ====== 阶段 1: 连接模拟器 ======
             if self._stop_event.is_set():
                 return
 
-            if driver is None:
-                _log.error("[阶段3] 浏览器实例不可用")
-                self._send({"type": "log", "text": "❌ 浏览器实例不可用，请重新启动", "level": "error"})
-                self._send({"type": "done", "text": "❌ 浏览器实例不可用"})
-                self._platform_logged_in = False
+            _log.info("[阶段1] 连接 MuMu 模拟器")
+            self._send({"type": "log", "text": f"正在连接模拟器: {DEVICE_URI}..."})
+
+            try:
+                device = AirtestDevice(DEVICE_URI)
+                device.connect()
+            except Exception as e:
+                _log.exception("[阶段1] 连接模拟器失败")
+                self._send({
+                    "type": "log",
+                    "text": f"❌ 连接模拟器失败: {e}\n请确认 MuMu 12 已启动且 ADB 端口为 7555",
+                    "level": "error",
+                })
+                self._send({"type": "done", "text": "❌ 连接模拟器失败"})
                 return
 
-            # 释放上一个 Navigator 的模板缓存
-            if _nav is not None:
-                _nav.cleanup()
+            self._device = device
+            self._send({"type": "log", "text": "✅ 模拟器已连接", "level": "success"})
 
-            self._send({"type": "log", "text": "等待游戏窗口..."})
-            nav = Navigator(driver=driver, templates_dir=resource_path(TEMPLATES_DIR))
+            # ====== 阶段 2: 游戏登录 ======
+            if self._stop_event.is_set():
+                return
 
-            # ====== 阶段 3: 游戏登录（最多重试 3 次） ======
-            # 若阶段 2 快速通道已点击 enter_game，跳过 game_login 直接进入清理流程
-            if _entered_via_fast_path:
-                self._send({"type": "log", "text": "快速通道已进入游戏，跳过游戏登录阶段", "level": "info"})
-                game_login_ok = True
-            else:
-                game_login_ok = False
+            _log.info("[阶段2] 开始游戏登录")
+            self._send({"type": "log", "text": "正在启动王者荣耀并登录..."})
 
-            GAME_LOGIN_MAX_RETRIES = 3
-
-            platform = self._platform_choice or "qq_ios"
-
-            platform_display = {
-                "wx_ios": "微信 iOS", "wx_android": "微信安卓",
-                "qq_ios": "QQ iOS", "qq_android": "QQ 安卓",
-            }.get(platform, platform)
-            self._send({"type": "log", "text": f"已选择游戏登录平台: {platform_display}"})
-
-            def on_game_qr(image=None):
-                title = f"游戏 {platform_display} 登录"
-                if image is not None:
-                    self._send({
-                        "type": "qr",
-                        "image": image,
-                        "title": title,
-                        "status": "⏳ 请扫描下方二维码（也可在游戏窗口扫）...",
-                    })
-                else:
-                    self._send({
-                        "type": "scan_wait",
-                        "title": title,
-                        "text": "⏳ 未截到二维码，请直接在游戏窗口扫码...",
-                    })
-
-            def on_game_status(text):
-                if "成功" in text:
-                    self._send({"type": "qr_status", "text": text, "color": "green"})
-                else:
-                    self._send({"type": "qr_status", "text": text})
-                self._send({"type": "log", "text": text,
-                            "level": "success" if "成功" in text else "info"})
-
-            if not game_login_ok:
-                for attempt in range(1, GAME_LOGIN_MAX_RETRIES + 1):
-                    if attempt > 1:
-                        self._send({"type": "log", "text": f"游戏登录重试 ({attempt}/{GAME_LOGIN_MAX_RETRIES})...", "level": "warn"})
-
-                    # 停止旧的弹窗监控（如有），阶段3不启动后台监控
-                    if monitor is not None:
-                        monitor.stop()
-                        monitor = None
-
-                    _log.info(f"[阶段3] 尝试 {attempt}/{GAME_LOGIN_MAX_RETRIES}, platform={platform}")
-                    if game_login(nav, platform, on_game_qr, on_game_status):
-                        game_login_ok = True
-                        break
-                    else:
-                        _log.warning(f"[阶段3] 尝试 {attempt}/{GAME_LOGIN_MAX_RETRIES} 失败")
-
-            if not game_login_ok:
-                _log.error("[阶段3] 游戏登录失败（3次重试已用完）")
-                self._send({"type": "log", "text": "❌ 游戏登录失败（已重试3次）", "level": "error"})
+            if not game_login(device, timeout=120.0):
+                _log.error("[阶段2] 游戏登录失败")
+                self._send({"type": "log", "text": "❌ 游戏登录失败", "level": "error"})
                 self._send({"type": "done", "text": "❌ 游戏登录失败"})
                 return
 
-            _log.info("[阶段3] 游戏登录成功")
-            self._send({"type": "page", "name": "progress"})
-            self._send({"type": "log", "text": "✅ 游戏登录成功（已点进入游戏）", "level": "success"})
+            self._send({"type": "log", "text": "✅ 游戏登录成功", "level": "success"})
 
-            # ---- 检测 after_play_popup ----
-            if nav.find_and_click("after_play_popup.png", timeout=5, max_retries=2, threshold=0.6):
-                self._send({"type": "log", "text": "已关闭 after_play_popup", "level": "success"})
-                time.sleep(2)
-            else:
-                self._send({"type": "log", "text": "未检测到 after_play_popup，跳过"})
-
-            # ---- 键位配置 ----
-            self._send({"type": "log", "text": "开始键位配置..."})
-            if not configure_keybinding(nav, on_log=lambda text, level="info":
-                    self._send({"type": "log", "text": text, "level": level})):
-                self._send({"type": "log", "text": "❌ 键位配置失败", "level": "error"})
-                self._send({"type": "done", "text": "❌ 键位配置失败"})
-                return
-            self._send({"type": "log", "text": "✅ 键位配置完成", "level": "success"})
-
-            # ---- 感知环：先彻底清弹窗 → 检测 enter_game → 验证主界面 ----
-            self._send({"type": "log", "text": "启动登录后感知环..."})
-            POST_LOGIN_TIMEOUT = 60
-            POST_LOGIN_TICK = 2.0
-            deadline = time.time() + POST_LOGIN_TIMEOUT
-
-            # ==== Phase 1: 彻底清弹窗（确认干净后才进入下一阶段） ====
-            self._send({"type": "log", "text": "感知环 Phase 1: 清理弹窗..."})
-            _popup_clean_rounds = 0
-            while time.time() < deadline:
-                if self._stop_event.is_set():
-                    return
-
-                hit = close_perception_popup(nav, on_log=lambda text, level="info":
-                    self._send({"type": "log", "text": text, "level": level}))
-                if hit:
-                    _popup_clean_rounds = 0  # 有关闭动作，重置计数
-                    time.sleep(POST_LOGIN_TICK)
-                    continue
-
-                _popup_clean_rounds += 1
-                if _popup_clean_rounds >= 3:
-                    self._send({"type": "log", "text": "弹窗清理完毕", "level": "success"})
-                    break
-                time.sleep(POST_LOGIN_TICK)
-
-            # ==== Phase 2: 检测 enter_game → 验证主界面 → 清返回箭头 ====
-            self._send({"type": "log", "text": "感知环 Phase 2: 检测进入游戏..."})
-            while time.time() < deadline:
-                if self._stop_event.is_set():
-                    return
-
-                # ① 仍有弹窗则优先关闭
-                hit = close_perception_popup(nav, on_log=lambda text, level="info":
-                    self._send({"type": "log", "text": text, "level": level}))
-                if hit:
-                    time.sleep(POST_LOGIN_TICK)
-                    continue
-
-                # ② 检测 enter_game.png（可能重连/重启后再次出现）
-                if nav.wait_for_template("enter_game.png", timeout=1):
-                    self._send({"type": "log", "text": "检测到进入游戏按钮，点击...", "level": "info"})
-                    nav.find_and_click("enter_game.png", timeout=5)
-                    time.sleep(3)
-                    continue
-
-                # ③ 验证主界面
-                if nav.wait_for_template("game_main.png", timeout=1):
-                    self._send({"type": "log", "text": "✅ 已进入游戏主界面", "level": "success"})
-                    break
-
-                # ④ 清返回箭头（可能在子页面）
-                if nav.find_and_click("back_arrow.png", timeout=2, max_retries=1, threshold=0.75):
-                    self._send({"type": "log", "text": "点击返回箭头..."})
-                    time.sleep(1)
-                    continue
-
-                time.sleep(POST_LOGIN_TICK)
-
-            else:
-                # 超时未检测到主界面
-                _log.error("[阶段3] 游戏登录验证失败：超时未检测到游戏主界面")
-                self._send({"type": "log", "text": "❌ 未进入游戏主界面（超时60s）", "level": "error"})
-                self._send({"type": "done", "text": "❌ 未进入游戏主界面"})
+            # ====== 阶段 3: 键位配置 ======
+            if self._stop_event.is_set():
                 return
 
-            # ====== 阶段 4: 感知环截图（弹窗优先，不再异步 PopupMonitor） ======
-            # 设计选项 A：环内同步处理弹窗，避免与主线程抢点击
-            account = self._account_var.get().strip()
-            if not account:
-                account = f"unknown_{time.strftime('%H%M%S')}"
-            shot = Screenshotter(
-                output_dir=os.path.join(writable_path(SCREENSHOTS_DIR), account),
-                driver=driver,
-            )
+            _log.info("[阶段3] 键位配置")
+            self._send({"type": "log", "text": "正在配置键位..."})
 
-            vw, vh = nav.viewport_size()
-            nobility_bounds = (0, 0, vw, int(vh * 0.5))
+            if not configure_keybinding(device):
+                _log.warning("[阶段3] 键位配置失败，继续截图")
+                self._send({
+                    "type": "log",
+                    "text": "⚠️ 键位配置失败，继续截图",
+                    "level": "warn",
+                })
+            else:
+                self._send({
+                    "type": "log",
+                    "text": "✅ 键位配置完成",
+                    "level": "success",
+                })
 
-            _coords = {}
-            try:
-                with open(resource_path("calibrated_coords.json"), "r") as f:
-                    _coords = json.load(f)
-            except Exception:
-                pass
-            _avatar_xy = tuple(_coords.get("avatar", [379, 249]))
-            _minion_xy = tuple(_coords.get("minion", [1377, 366]))
-            _log.info(f"坐标点击仅保留: avatar={_avatar_xy}, minion={_minion_xy}")
+            # ====== 阶段 4: 截图循环 ======
+            if self._stop_event.is_set():
+                return
 
-            screenshot_tasks = [
-                ("主页", [
-                    ("__coords__", "点击左上角头像", _avatar_xy, "game_main.png"),
-                    ("tab_home.png", "点击主页标签"),
-                ], 0),
-                ("英雄", [
-                    ("tab_hero.png", "点击英雄标签"),
-                ], 0),
-                ("万象图鉴首页", [
-                    ("tab_illustrated.png", "点击图鉴标签"),
-                    ("__guard__", "back_arrow.png", _avatar_xy, "返回箭头守卫"),
-                    ("universal_illustrated.png", "点击万象图鉴"),
-                ], 0),
-                ("万象图鉴-灵宝", [
-                    ("lingbao.png", "点击灵宝"),
-                ], 1),
-                ("按键", [
-                    ("in_game_btn.png", "点击局内按钮"),
-                    ("keybind_btn.png", "点击按键按钮"),
-                ], 1),
-                ("天幕", [
-                    ("tianmu.png", "点击天幕"),
-                ], 1),
-                ("星典藏", [
-                    ("xingyuan.png", "点击星元"),
-                    ("xing_collection.png", "点击星典藏"),
-                ], 0),
-                ("星传说", [
-                    ("xing_legend.png", "点击星传说"),
-                ], 1),
-                ("皮肤图鉴", [
-                    ("skin_illustrated.png", "点击皮肤图鉴"),
-                ], 0),
-                ("珍品无双", [
-                    ("skin_treasure_wushuang.png", "点击珍品无双"),
-                ], 1),
-                ("荣耀典藏", [
-                    ("skin_glory_collection.png", "点击荣耀典藏"),
-                ], 1),
-                ("无双", [
-                    ("skin_wushuang.png", "点击无双"),
-                ], 1),
-                ("珍品传说", [
-                    ("skin_treasure_legend.png", "点击珍品传说"),
-                ], 1),
-                ("传说", [
-                    ("skin_legend.png", "点击传说"),
-                ], 2),
-                ("积分夺宝", [
-                    ("shop_icon.png", "点击商城"),
-                    ("lottery_tab.png", "点击夺宝"),
-                    ("points_lottery.png", "点击积分夺宝"),
-                ], 2),
-                ("货币背包", [
-                    ("bag.png", "点击背包"),
-                    ("currency_bag.png", "点击货币背包"),
-                ], 2),
-                ("小兵", [
-                    ("customize_icon.png", "点击定制"),
-                    ("skin_customize.png", "点击皮肤定制"),
-                    ("__coords__", "点击小兵", _minion_xy, "back_arrow.png", 120),
-                ], 1),
-                ("个性戳戳", [
-                    ("customize_icon.png", "点击定制"),
-                    ("personal_customize.png", "点击个性定制"),
-                    ("poke.png", "点击个性戳戳"),
-                ], 1),
-                ("贵族", [
-                    ("nobility_icon.png", "点击贵族图标", nobility_bounds),
-                ], 1),
-            ]
-
-            total = len(screenshot_tasks)
-
-            def _do_recover():
-                """尝试从游戏重启中恢复。返回 True 表示恢复成功。"""
-                self._send({"type": "log", "text": "等待游戏恢复（最多 60s）...", "level": "warn"})
-                start = time.time()
-                game_templates = [
-                    "game_wx_ios.png", "game_wx_android.png",
-                    "game_qq_ios.png", "game_qq_android.png",
-                ]
-                while time.time() - start < 60:
-                    if self._stop_event.is_set():
-                        return False
-                    if nav.wait_for_template("game_main.png", timeout=2):
-                        self._send({"type": "log", "text": "检测到游戏主界面，无需重新登录", "level": "info"})
-                        return True
-                    for tpl in game_templates:
-                        if nav.wait_for_template(tpl, timeout=1, threshold=0.6):
-                            self._send({"type": "log", "text": "检测到登录界面，重新登录...", "level": "info"})
-                            return bool(game_login(nav, platform, on_game_qr, on_game_status))
-                    time.sleep(2)
-                self._send({"type": "log", "text": "等待游戏恢复超时", "level": "error"})
-                return False
+            _log.info("[阶段4] 开始截图循环")
+            self._send({"type": "log", "text": "开始截图循环..."})
 
             def _on_log(text, level="info"):
                 self._send({"type": "log", "text": text, "level": level})
@@ -840,59 +297,22 @@ class App(tk.Tk):
             def _on_progress(cur, tot):
                 self._send({"type": "progress", "current": cur, "total": tot})
 
-            self._send({"type": "log", "text": "启动感知环截图（弹窗优先）"})
-            _log.info("阶段 4 感知环启动")
-            success = UiLoop(
-                nav=nav,
-                shot=shot,
-                tasks=screenshot_tasks,
-                stop_event=self._stop_event,
-                on_log=_on_log,
+            success = run_screenshot_loop(
+                device=device,
+                tasks=ALL_TASKS,
                 on_progress=_on_progress,
-                recover=_do_recover,
-                relogin=lambda: game_login(nav, platform, on_game_qr, on_game_status),
-                avatar_coords=_avatar_xy,
-            ).run()
+                on_log=_on_log,
+            )
 
-            if self._stop_event.is_set():
-                return
-
-            self._send({"type": "progress", "current": total, "total": total})
-            self._send({"type": "log", "text": f"完成: {success}/{total} 张截图成功", "level": "success"})
-
-            # ====== 截图完成，关闭云游戏并退出浏览器 ======
-            self._send({"type": "log", "text": "正在关闭云游戏标签页...", "level": "info"})
-            try:
-                handles = driver.window_handles
-                if len(handles) > 1:
-                    # Step 1: 关闭云游戏标签页（触发 TCP RST，服务端回收容器）
-                    driver.close()
-                    # Step 2: 切回先锋首页，清 Storage 破坏重连上下文
-                    driver.switch_to.window(handles[0])
-                    try:
-                        driver.execute_script(
-                            "localStorage.clear(); sessionStorage.clear();")
-                    except Exception:
-                        pass
-                    self._send({"type": "log", "text": "云游戏标签页已关闭，Storage 已清理", "level": "success"})
-            except Exception:
-                self._send({"type": "log", "text": "关闭云游戏标签页失败", "level": "warn"})
-
-            # Step 3: 关闭整个浏览器
-            self._send({"type": "log", "text": "正在关闭浏览器...", "level": "info"})
-            if driver is not None:
-                try:
-                    driver.quit()
-                except Exception:
-                    pass
-                driver = None
-            self._driver = None
-            self._platform_logged_in = False
-            self._send({"type": "log", "text": "浏览器已关闭", "level": "success"})
+            self._send({
+                "type": "log",
+                "text": f"完成: {success}/{len(ALL_TASKS)} 张截图成功",
+                "level": "success",
+            })
 
             self._send({
                 "type": "done",
-                "text": f"✅ 本轮完成: {success}/{total} 张截图"
+                "text": f"✅ 本轮完成: {success}/{len(ALL_TASKS)} 张截图"
             })
 
         except Exception as e:
@@ -902,46 +322,13 @@ class App(tk.Tk):
             self._send({"type": "done", "text": f"❌ 运行异常: {e}"})
             traceback.print_exc()
         finally:
-            if monitor is not None:
-                monitor.stop()
-            if _nav is not None:
-                _nav.cleanup()
-            if nav is not None:
-                nav.cleanup()
-            # 兜底：确保浏览器已关闭且不残留鼠标锁定
-            if driver is not None:
-                import process_cleanup
-
-                # 0. 释放浏览器锁定状态（Pointer Lock / Fullscreen）
-                #    必须在 quit 之前执行，否则 CDP 连接断开后无法释放
-                process_cleanup.release_browser_locks(driver)
-
-                # 1. 优雅退出
+            # 断开设备连接
+            if self._device is not None:
                 try:
-                    driver.quit()
+                    self._device.disconnect()
                 except Exception:
                     pass
-
-                # 2. 等待并验证进程真正退出后再移出追踪
-                #    quit() 返回只说明 HTTP 请求已发送，子进程退出需要时间
-                #    若 driver 还活着，留在 _drivers 中让 cleanup_all 做三级强杀
-                time.sleep(1.5)
-                try:
-                    driver_pid = driver.service.process.pid
-                    if driver_pid and not process_cleanup._process_exists(driver_pid):
-                        # 进程已确认退出 → 安全移出追踪
-                        process_cleanup.unregister_driver(driver)
-                    else:
-                        # 进程仍存活 → 留给 cleanup_all / atexit 的三级降级处理
-                        _log.warning(
-                            f"driver.quit() 后 driver PID {driver_pid} 仍存活，"
-                            f"交由 cleanup_all 强杀"
-                        )
-                except Exception:
-                    # 无法获取 PID 时保守移出（driver 大概率已不可用）
-                    process_cleanup.unregister_driver(driver)
-                driver = None
-            self._driver = None
+                self._device = None
 
     # ------------------------------------------------------------------
     # 启动

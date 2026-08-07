@@ -79,7 +79,7 @@ class App(tk.Tk):
         emu_frame.pack(pady=5, fill="x", padx=10)
         ttk.Label(
             emu_frame,
-            text="MuMu 12 Android Emulator\nADB: 127.0.0.1:7555",
+            text="MuMu 12 Android Emulator\nADB: 127.0.0.1:5555",
             font=("", 10)
         ).pack(anchor="w")
 
@@ -219,9 +219,7 @@ class App(tk.Tk):
 
             from airtest_device import AirtestDevice
             from airtest_login import game_login
-            from airtest_keybind import configure_keybinding
             from airtest_tasks import ALL_TASKS, run_screenshot_loop
-            from config import DEVICE_URI
 
             _log.info("工作流模块就绪")
 
@@ -230,16 +228,16 @@ class App(tk.Tk):
                 return
 
             _log.info("[阶段1] 连接 MuMu 模拟器")
-            self._send({"type": "log", "text": f"正在连接模拟器: {DEVICE_URI}..."})
+            self._send({"type": "log", "text": "正在连接模拟器..."})
 
             try:
-                device = AirtestDevice(DEVICE_URI)
+                device = AirtestDevice()
                 device.connect()
             except Exception as e:
                 _log.exception("[阶段1] 连接模拟器失败")
                 self._send({
                     "type": "log",
-                    "text": f"❌ 连接模拟器失败: {e}\n请确认 MuMu 12 已启动且 ADB 端口为 7555",
+                    "text": f"❌ 连接模拟器失败: {e}\n请确认 MuMu 12 已启动且 ADB 端口为 5555",
                     "level": "error",
                 })
                 self._send({"type": "done", "text": "❌ 连接模拟器失败"})
@@ -263,32 +261,7 @@ class App(tk.Tk):
 
             self._send({"type": "log", "text": "✅ 游戏登录成功", "level": "success"})
 
-            # ====== 阶段 3: 键位配置 ======
-            if self._stop_event.is_set():
-                return
-
-            _log.info("[阶段3] 键位配置")
-            self._send({"type": "log", "text": "正在配置键位..."})
-
-            if not configure_keybinding(device):
-                _log.warning("[阶段3] 键位配置失败，继续截图")
-                self._send({
-                    "type": "log",
-                    "text": "⚠️ 键位配置失败，继续截图",
-                    "level": "warn",
-                })
-            else:
-                self._send({
-                    "type": "log",
-                    "text": "✅ 键位配置完成",
-                    "level": "success",
-                })
-
-            # ====== 阶段 4: 截图循环 ======
-            if self._stop_event.is_set():
-                return
-
-            _log.info("[阶段4] 开始截图循环")
+            # ====== 阶段 3: 截图循环 ======
             self._send({"type": "log", "text": "开始截图循环..."})
 
             def _on_log(text, level="info"):

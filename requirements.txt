@@ -2,3 +2,4 @@ airtest>=1.4.0
 pocoui>=1.0
 Pillow>=10.0
 numpy>=1.24
+easyocr>=1.7.0

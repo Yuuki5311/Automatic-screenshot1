@@ -1,70 +1,40 @@
 # 模板图准备指南
 
-运行脚本前，需要在 `templates/` 目录下放入以下按钮模板图。
-模板图通过首次手动进入游戏后截取小图获得。
+> **当前架构（Airtest 迁移后）：导航以 OCR 文字识别为主，模板匹配仅用于少量纯图标按钮。**
+
+模板图存放在 `airtest_templates/` 目录（不是本 `templates/` 目录）。
+
+## 所需模板图清单（仅 2 张）
+
+| 文件名 | 说明 | 用途 |
+|--------|------|------|
+| `back_arrow.png` | 返回箭头 | 万象图鉴首页点击返回（[airtest_tasks.py:323](../airtest_tasks.py#L323)） |
+| `nobility_icon.png` | 贵族图标 | 主界面点击进入贵族页（[airtest_tasks.py:445](../airtest_tasks.py#L445)） |
+
+其余所有导航操作（进入图鉴、切换标签、点击商城等）均使用 **EasyOCR 文字识别**（`ClickText`），不需要模板图。
 
 ## 截取方法
 
-1. 运行脚本，在 QQ 登录完成后手动进入对应页面
-2. 截取整个游戏画面
-3. 用小画图工具裁剪出目标按钮区域（建议裁剪 30-50px 边距）
-4. 保存为对应的文件名
+### 方式一：AirtestIDE（推荐）
 
-## 所需模板图清单
+1. 打开 AirtestIDE，连接 MuMu 模拟器
+2. 用 AirtestIDE 的「截屏」获取游戏画面
+3. 在截图上框选目标按钮，右键 →「保存选中区域」
+4. 保存到 `airtest_templates/` 目录，命名为对应文件名
 
-### 主界面
-| 文件名 | 说明 | 位置 |
-|--------|------|------|
-| `avatar.png` | 左上角头像 | 主界面左上角 |
-| `shop_icon.png` | 商城入口图标 | 主界面右侧 |
-| `customize_icon.png` | 定制入口图标 | 主界面下方 |
-| `nobility_icon.png` | 贵族图标 | 主界面上方 |
-| `game_main.png` | 游戏主界面特征 | 用于确认游戏已加载 |
-| `back_arrow.png` | 返回箭头 | 页面左上角通用返回 |
+### 方式二：手动截取
 
-### 个人主页
-| 文件名 | 说明 |
-|--------|------|
-| `tab_home.png` | 主页标签 |
-| `tab_hero.png` | 英雄标签 |
-| `tab_illustrated.png` | 图鉴标签 |
+1. 用 MuMu 模拟器截图功能截取游戏画面
+2. 用画图工具裁剪出目标按钮，周围保留 30~50px 游戏 UI 背景以增加匹配唯一性
+3. 保存到 `airtest_templates/` 目录
 
-### 图鉴
-| 文件名 | 说明 |
-|--------|------|
-| `universal_illustrated.png` | 万象图鉴入口 |
-| `lingbao.png` | 灵宝入口 |
-| `tianmu.png` | 天幕入口（万象图鉴页，需重新截取） |
-| `xingyuan.png` | 星元入口（万象图鉴页） |
-| `xing_collection.png` | 星典藏入口（星元页内） |
-| `xing_legend.png` | 星传说入口（星元页内） |
-| `skin_illustrated.png` | 皮肤图鉴入口 |
-| `skin_treasure_wushuang.png` | 珍品无双图标（皮肤图鉴页内） |
-| `skin_glory_collection.png` | 荣耀典藏图标（皮肤图鉴页内） |
-| `skin_wushuang.png` | 无双图标（皮肤图鉴页内） |
-| `skin_treasure_legend.png` | 珍品传说图标（皮肤图鉴页内） |
-| `skin_legend.png` | 传说图标（皮肤图鉴页内） |
-| `bag.png` | 主界面背包按钮 |
-| `currency_bag.png` | 背包页右上角货币背包 |
+### 匹配阈值
 
-### 商城
-| 文件名 | 说明 |
-|--------|------|
-| `lottery_tab.png` | 夺宝标签 |
-| `points_lottery.png` | 积分夺宝入口 |
+- 默认 `threshold=0.7`（在 [airtest_tasks.py](../airtest_tasks.py) 中设定）
+- 模板图越精确，匹配成功率越高
 
-### 定制
-| 文件名 | 说明 |
-|--------|------|
-| `skin_customize.png` | 皮肤定制 |
-| `my_tab.png` | 我的标签 |
-| `minion.png` | 小兵 |
-| `personal_customize.png` | 个性定制 |
-| `poke.png` | 个性戳戳 |
+## 截图输出
 
-### 可选（游戏启动）
-| 文件名 | 说明 |
-|--------|------|
-| `honor_of_kings.png` | 腾讯先锋页面中的王者荣耀图标 |
+脚本运行后截图保存在 [`screenshots/`](../screenshots/) 目录，文件名按任务名命名（如 `skin_illustrated.png`、`lottery_tab.png` 等）。
 
-> **提示:** 模板图越精确，匹配成功率越高。建议在模板图周围保留少量游戏 UI 背景以增加匹配唯一性。
+> **注意：** `screenshots/` 中的截图是本项目的**产物**（游戏截图），不是模板图，不要混淆。

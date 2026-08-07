@@ -30,6 +30,15 @@ class ClickTemplate:
 
 
 @dataclass
+class ClickText:
+    """OCR 文字点击操作 — 替代 ClickTemplate，无需模板图。"""
+    text: str
+    desc: str = ""
+    timeout: float = 10.0
+    threshold: float = 0.8
+
+
+@dataclass
 class ClickCoord:
     """坐标点击操作（极少场景：点击位置不固定的元素）。
 
@@ -38,12 +47,14 @@ class ClickCoord:
         y: 点击纵坐标。
         desc: 操作描述。
         verify_template: 点击后等待出现的模板（如加载缓慢的目标页）。
-        verify_timeout: 等待 verify_template 的超时秒数。
+        verify_text: 点击后等待出现的 OCR 文字（与 verify_template 二选一）。
+        verify_timeout: 等待超时秒数。
     """
     x: int
     y: int
     desc: str = ""
     verify_template: str = ""
+    verify_text: str = ""
     verify_timeout: float = 30.0
 
 
@@ -64,7 +75,7 @@ class GuardAction:
 
 
 # Union type for task setup actions
-Action = Union[ClickTemplate, ClickCoord, SwipeAction, GuardAction]
+Action = Union[ClickTemplate, ClickText, ClickCoord, SwipeAction, GuardAction]
 
 
 @dataclass
@@ -87,11 +98,7 @@ class ScreenshotTask:
 # 弹窗模板列表（每轮截图后快速扫描）
 # ------------------------------------------------------------------
 
-POPUP_TEMPLATES = [
-    "popup_close.png",
-    "popup_x.png",
-    "after_play_popup.png",
-]
+POPUP_KEYWORDS = ["关闭", "确定", "取消"]
 
 
 # ------------------------------------------------------------------
@@ -107,6 +114,9 @@ def execute_action(device, action: Action) -> bool:
     """
     if isinstance(action, ClickTemplate):
         return _execute_click_template(device, action)
+
+    elif isinstance(action, ClickText):
+        return _execute_click_text(device, action)
 
     elif isinstance(action, ClickCoord):
         return _execute_click_coord(device, action)
@@ -139,6 +149,23 @@ def _execute_click_template(device, action: ClickTemplate) -> bool:
     return False
 
 
+def _execute_click_text(device, action: ClickText) -> bool:
+    """带重试的 OCR 文字点击。"""
+    for attempt in range(1, MAX_RETRIES + 1):
+        if device.click_text(
+            action.text,
+            timeout=action.timeout,
+            threshold=action.threshold,
+        ):
+            time.sleep(CLICK_INTERVAL)
+            return True
+        if attempt < MAX_RETRIES:
+            log.warning(f"重试 OCR 点击 {action.desc or action.text} ({attempt}/{MAX_RETRIES})")
+            time.sleep(1)
+    log.error(f"OCR 点击失败 ({MAX_RETRIES}次重试): {action.desc or action.text}")
+    return False
+
+
 def _execute_click_coord(device, action: ClickCoord) -> bool:
     """坐标点击。使用 Airtest touch() 坐标模式。"""
     from airtest.core.api import touch
@@ -149,6 +176,11 @@ def _execute_click_coord(device, action: ClickCoord) -> bool:
         log.info(f"等待验证模板: {action.verify_template} (最多 {action.verify_timeout}s)")
         if not device.wait_template(action.verify_template, timeout=action.verify_timeout):
             log.error(f"验证模板未出现 ({action.verify_timeout}s): {action.verify_template}")
+            return False
+    if action.verify_text:
+        log.info(f"等待验证文字: '{action.verify_text}' (最多 {action.verify_timeout}s)")
+        if not device.wait_text(action.verify_text, timeout=action.verify_timeout):
+            log.error(f"验证文字未出现 ({action.verify_timeout}s): '{action.verify_text}'")
             return False
     return True
 
@@ -181,10 +213,10 @@ def _execute_guard(device, action: GuardAction) -> bool:
 def scan_popups(device) -> int:
     """扫描并关闭已知弹窗。返回关闭的弹窗数量。"""
     closed = 0
-    for tpl_name in POPUP_TEMPLATES:
-        if device.exists_template(tpl_name, threshold=0.7):
-            log.info(f"扫描到弹窗: {tpl_name}")
-            if device.click_template(tpl_name, timeout=3.0, threshold=0.7):
+    for keyword in POPUP_KEYWORDS:
+        if device.exists_text(keyword, threshold=0.8):
+            log.info(f"扫描到弹窗关键词: '{keyword}'")
+            if device.click_text(keyword, timeout=3.0, threshold=0.8):
                 closed += 1
                 time.sleep(CLICK_INTERVAL)
     return closed
@@ -273,144 +305,144 @@ ALL_TASKS: list[ScreenshotTask] = [
         name="主页",
         setup=[
             ClickCoord(379, 249, desc="点击左上角头像进入个人主页"),
-            ClickTemplate("tab_home.png", desc="点击主页标签"),
+            ClickText("主页", desc="点击主页标签"),
         ],
         teardown_back=0,
     ),
     ScreenshotTask(
         name="英雄",
         setup=[
-            ClickTemplate("tab_hero.png", desc="点击英雄标签"),
+            ClickText("英雄", desc="点击英雄标签"),
         ],
         teardown_back=0,
     ),
     ScreenshotTask(
         name="万象图鉴首页",
         setup=[
-            ClickTemplate("tab_illustrated.png", desc="点击图鉴标签"),
-            GuardAction("back_arrow.png", "back_arrow.png", desc="返回箭头守卫"),
-            ClickTemplate("universal_illustrated.png", desc="点击万象图鉴"),
+            ClickText("图鉴", desc="点击图鉴标签"),
+            ClickTemplate("back_arrow.png", threshold=0.7, desc="点击返回按钮"),
+            ClickText("万象图鉴", desc="点击万象图鉴"),
         ],
         teardown_back=0,
     ),
     ScreenshotTask(
         name="万象图鉴-灵宝",
         setup=[
-            ClickTemplate("lingbao.png", desc="点击灵宝"),
+            ClickText("灵宝", desc="点击灵宝"),
         ],
         teardown_back=1,
     ),
     ScreenshotTask(
         name="按键",
         setup=[
-            ClickTemplate("in_game_btn.png", desc="点击局内按钮"),
-            ClickTemplate("keybind_btn.png", desc="点击按键按钮"),
+            ClickText("局内", desc="点击局内按钮"),
+            ClickText("按键", desc="点击按键按钮"),
         ],
         teardown_back=1,
     ),
     ScreenshotTask(
         name="天幕",
         setup=[
-            ClickTemplate("tianmu.png", desc="点击天幕"),
+            ClickText("天幕", desc="点击天幕"),
         ],
         teardown_back=1,
     ),
     ScreenshotTask(
         name="星典藏",
         setup=[
-            ClickTemplate("xingyuan.png", desc="点击星元"),
-            ClickTemplate("xing_collection.png", desc="点击星典藏"),
+            ClickText("星元", desc="点击星元"),
+            ClickText("星典藏", desc="点击星典藏"),
         ],
         teardown_back=0,
     ),
     ScreenshotTask(
         name="星传说",
         setup=[
-            ClickTemplate("xing_legend.png", desc="点击星传说"),
+            ClickText("星传说", desc="点击星传说"),
         ],
         teardown_back=1,
     ),
     ScreenshotTask(
         name="皮肤图鉴",
         setup=[
-            ClickTemplate("skin_illustrated.png", desc="点击皮肤图鉴"),
+            ClickText("皮肤图鉴", desc="点击皮肤图鉴"),
         ],
         teardown_back=0,
     ),
     ScreenshotTask(
         name="珍品无双",
         setup=[
-            ClickTemplate("skin_treasure_wushuang.png", desc="点击珍品无双"),
+            ClickText("珍品无双", desc="点击珍品无双"),
         ],
         teardown_back=1,
     ),
     ScreenshotTask(
         name="荣耀典藏",
         setup=[
-            ClickTemplate("skin_glory_collection.png", desc="点击荣耀典藏"),
+            ClickText("荣耀典藏", desc="点击荣耀典藏"),
         ],
         teardown_back=1,
     ),
     ScreenshotTask(
         name="无双",
         setup=[
-            ClickTemplate("skin_wushuang.png", desc="点击无双"),
+            ClickText("无双", desc="点击无双"),
         ],
         teardown_back=1,
     ),
     ScreenshotTask(
         name="珍品传说",
         setup=[
-            ClickTemplate("skin_treasure_legend.png", desc="点击珍品传说"),
+            ClickText("珍品传说", desc="点击珍品传说"),
         ],
         teardown_back=1,
     ),
     ScreenshotTask(
         name="传说",
         setup=[
-            ClickTemplate("skin_legend.png", desc="点击传说"),
+            ClickText("传说", desc="点击传说"),
         ],
         teardown_back=2,
     ),
     ScreenshotTask(
         name="积分夺宝",
         setup=[
-            ClickTemplate("shop_icon.png", desc="点击商城"),
-            ClickTemplate("lottery_tab.png", desc="点击夺宝"),
-            ClickTemplate("points_lottery.png", desc="点击积分夺宝"),
+            ClickText("商城", desc="点击商城"),
+            ClickText("夺宝", desc="点击夺宝"),
+            ClickText("积分夺宝", desc="点击积分夺宝"),
         ],
         teardown_back=2,
     ),
     ScreenshotTask(
         name="货币背包",
         setup=[
-            ClickTemplate("bag.png", desc="点击背包"),
-            ClickTemplate("currency_bag.png", desc="点击货币背包"),
+            ClickText("背包", desc="点击背包"),
+            ClickText("货币背包", desc="点击货币背包"),
         ],
         teardown_back=2,
     ),
     ScreenshotTask(
         name="小兵",
         setup=[
-            ClickTemplate("customize_icon.png", desc="点击定制"),
-            ClickTemplate("skin_customize.png", desc="点击皮肤定制"),
-            ClickCoord(1377, 366, desc="点击小兵", verify_template="back_arrow.png", verify_timeout=120.0),
+            ClickText("定制", desc="点击定制"),
+            ClickText("皮肤定制", desc="点击皮肤定制"),
+            ClickCoord(1377, 366, desc="点击小兵", verify_text="返回", verify_timeout=120.0),
         ],
         teardown_back=1,
     ),
     ScreenshotTask(
         name="个性戳戳",
         setup=[
-            ClickTemplate("customize_icon.png", desc="点击定制"),
-            ClickTemplate("personal_customize.png", desc="点击个性定制"),
-            ClickTemplate("poke.png", desc="点击个性戳戳"),
+            ClickText("定制", desc="点击定制"),
+            ClickText("个性定制", desc="点击个性定制"),
+            ClickText("个性戳戳", desc="点击个性戳戳"),
         ],
         teardown_back=1,
     ),
     ScreenshotTask(
         name="贵族",
         setup=[
-            ClickTemplate("nobility_icon.png", desc="点击贵族图标"),
+            ClickTemplate("nobility_icon.png", threshold=0.7, desc="点击贵族图标"),
         ],
         teardown_back=1,
     ),

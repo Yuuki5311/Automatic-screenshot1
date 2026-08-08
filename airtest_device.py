@@ -144,6 +144,67 @@ class AirtestDevice:
             p = p.with_suffix(".png")
         return str(p)
 
+    def find_template(
+        self,
+        template_name: str,
+        threshold: float = DEFAULT_THRESHOLD,
+        bounds: tuple[int, int, int, int] | None = None,
+    ) -> tuple[int, int] | None:
+        """非阻塞查找模板，返回匹配中心坐标。
+
+        如果指定 bounds=(x, y, w, h)，仅在屏幕该区域内搜索。
+
+        Returns:
+            (x, y) | None
+        """
+        if bounds is None:
+            # 全屏搜索
+            tpl_path = self._template_path(template_name)
+            tpl = Template(tpl_path, threshold=threshold)
+            try:
+                match = exists(tpl)
+                if match:
+                    return match
+            except (TargetNotFoundError, FileNotExistError, OSError):
+                pass
+            return None
+
+        # 区域搜索：截屏 → 裁剪 → OpenCV 模板匹配
+        import cv2
+        import numpy as np
+
+        img = self._raw_screencap()
+        if img is None:
+            return None
+
+        frame = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+        tpl_path = self._template_path(template_name)
+        tpl_img = cv2.imdecode(np.fromfile(tpl_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if tpl_img is None:
+            return None
+
+        bx, by, bw, bh = bounds
+        h, w = frame.shape[:2]
+        bx = max(0, bx)
+        by = max(0, by)
+        bw = min(bw, w - bx)
+        bh = min(bh, h - by)
+        if bw <= 0 or bh <= 0:
+            return None
+
+        roi = frame[by:by + bh, bx:bx + bw]
+        result = cv2.matchTemplate(roi, tpl_img, cv2.TM_CCOEFF_NORMED)
+        _, max_val, _, max_loc = cv2.minMaxLoc(result)
+
+        if max_val < threshold:
+            return None
+
+        # 还原到全屏坐标
+        cx = bx + max_loc[0] + tpl_img.shape[1] // 2
+        cy = by + max_loc[1] + tpl_img.shape[0] // 2
+        log.info(f"模板 {template_name} 匹配 → ({cx}, {cy}) 置信度={max_val:.2f}")
+        return (cx, cy)
+
     def click_template(
         self,
         template_name: str,

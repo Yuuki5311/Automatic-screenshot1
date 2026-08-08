@@ -10,6 +10,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable, Union
 
+from airtest.core.api import touch
+
 from config import CLICK_INTERVAL, MAX_RETRIES, SHOT_DELAY
 from logger import get_logger
 
@@ -27,6 +29,7 @@ class ClickTemplate:
     desc: str = ""
     timeout: float = 10.0
     threshold: float = 0.7
+    bounds: tuple = ()  # (x, y, w, h) 搜索区域，空则全屏
 
 
 @dataclass
@@ -133,15 +136,30 @@ def execute_action(device, action: Action) -> bool:
 
 
 def _execute_click_template(device, action: ClickTemplate) -> bool:
-    """带重试的模板点击。"""
+    """带重试的模板点击。有 bounds 时走 find_template+坐标点击，无 bounds 走 Airtest 原生路径。"""
     for attempt in range(1, MAX_RETRIES + 1):
-        if device.click_template(
-            action.template,
-            timeout=action.timeout,
-            threshold=action.threshold,
-        ):
-            time.sleep(CLICK_INTERVAL)
-            return True
+        if action.bounds:
+            # 区域搜索 → 坐标点击 (与 popup_close 同路径)
+            bounds = action.bounds if len(action.bounds) == 4 else None
+            pos = device.find_template(
+                action.template,
+                threshold=action.threshold,
+                bounds=bounds,
+            )
+            if pos is not None:
+                touch(pos)
+                log.info(f"点击模板 {action.template} @ ({pos[0]}, {pos[1]})")
+                time.sleep(CLICK_INTERVAL)
+                return True
+        else:
+            # 全屏搜索，Airtest 原生路径
+            if device.click_template(
+                action.template,
+                timeout=action.timeout,
+                threshold=action.threshold,
+            ):
+                time.sleep(CLICK_INTERVAL)
+                return True
         if attempt < MAX_RETRIES:
             log.warning(f"重试 {action.desc or action.template} ({attempt}/{MAX_RETRIES})")
             time.sleep(1)
@@ -168,7 +186,6 @@ def _execute_click_text(device, action: ClickText) -> bool:
 
 def _execute_click_coord(device, action: ClickCoord) -> bool:
     """坐标点击。使用 Airtest touch() 坐标模式。"""
-    from airtest.core.api import touch
     touch((action.x, action.y))
     log.info(f"坐标点击: ({action.x}, {action.y}) {action.desc}")
     time.sleep(CLICK_INTERVAL)
@@ -211,8 +228,19 @@ def _execute_guard(device, action: GuardAction) -> bool:
 # ------------------------------------------------------------------
 
 def scan_popups(device) -> int:
-    """扫描并关闭已知弹窗。返回关闭的弹窗数量。"""
+    """扫描并关闭已知弹窗。优先用模板匹配，再 OCR 兜底。返回关闭的弹窗数量。"""
     closed = 0
+
+    # 1. 模板匹配: popup_close.png → 只搜右上半屏，坐标点击
+    pos = device.find_template("popup_close.png", threshold=0.7,
+                               bounds=(960, 0, 960, 540))
+    if pos is not None:
+        log.info(f"扫描到弹窗关闭按钮 (模板) @ ({pos[0]}, {pos[1]})")
+        touch(pos)
+        closed += 1
+        time.sleep(CLICK_INTERVAL)
+
+    # 2. OCR 兜底: 关闭/确定/取消
     for keyword in POPUP_KEYWORDS:
         if device.exists_text(keyword, threshold=0.8):
             log.info(f"扫描到弹窗关键词: '{keyword}'")
@@ -304,7 +332,7 @@ ALL_TASKS: list[ScreenshotTask] = [
     ScreenshotTask(
         name="主页",
         setup=[
-            ClickCoord(379, 249, desc="点击左上角头像进入个人主页"),
+            ClickCoord(72, 64, desc="点击左上角头像进入个人主页"),
             ClickText("主页", desc="点击主页标签"),
         ],
         teardown_back=0,
@@ -320,7 +348,7 @@ ALL_TASKS: list[ScreenshotTask] = [
         name="万象图鉴首页",
         setup=[
             ClickText("图鉴", desc="点击图鉴标签"),
-            ClickTemplate("back_arrow.png", threshold=0.7, desc="点击返回按钮"),
+            ClickTemplate("back_arrow.png", threshold=0.7, bounds=(0, 0, 960, 540), desc="点击返回按钮"),
             ClickText("万象图鉴", desc="点击万象图鉴"),
         ],
         teardown_back=0,
@@ -426,7 +454,7 @@ ALL_TASKS: list[ScreenshotTask] = [
         setup=[
             ClickText("定制", desc="点击定制"),
             ClickText("皮肤定制", desc="点击皮肤定制"),
-            ClickCoord(1377, 366, desc="点击小兵", verify_text="返回", verify_timeout=120.0),
+            ClickCoord(1702, 283, desc="点击小兵", verify_text="返回", verify_timeout=120.0),
         ],
         teardown_back=1,
     ),
@@ -442,7 +470,7 @@ ALL_TASKS: list[ScreenshotTask] = [
     ScreenshotTask(
         name="贵族",
         setup=[
-            ClickTemplate("nobility_icon.png", threshold=0.7, desc="点击贵族图标"),
+            ClickTemplate("nobility_icon.png", threshold=0.7, bounds=(0, 0, 1920, 540), desc="点击贵族图标"),
         ],
         teardown_back=1,
     ),
